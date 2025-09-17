@@ -155,7 +155,7 @@ function checkout_condicional_v1_admin_page() {
                                     WHERE a.estado = 1 ORDER BY e.nombre, a.nombre");
     
     ?>
-    <div class="wrap">
+    <div class="wrap" style="display: none;">
         <h1>Checkout Condicional V1 - Gestión de Envíos</h1>
         
         <div class="nav-tab-wrapper">
@@ -653,32 +653,12 @@ function checkout_extra_fields_v1($checkout) {
         $modo_agencia = 'lista';
     }
 
-    echo '<div id="extra_fields_checkout" style="margin-top: 20px; padding: 20px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">';
+    // === CONTENEDOR PRINCIPAL PARA PROVINCIAS ===
+    echo '<div id="extra_fields_checkout" style="margin-top: 20px; padding: 20px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display:none;">';
     echo '<h3 style="margin: 0 0 20px 0; color: #333333; font-size: 18px; border-bottom: 2px solid #cccccc; padding-bottom: 10px;">Información de Envío</h3>';
 
-    // === CAMPOS: FECHAS DE ENTREGA (para Lima y Callao) ===
-    echo '<div class="fecha-entrega-field" style="display:none;">';
-    echo '<h4 style="margin: 0 0 15px 0; color: #495057; font-size: 16px; border-bottom: 1px solid #dee2e6; padding-bottom: 8px;">Selecciona las Fechas de Entrega</h4>';
-    
-    echo '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
-    echo '<div>';
-    echo '<label for="billing_fecha_entrega_1" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Fecha Preferida<span class="required" style="color: #e74c3c;">*</span></label>';
-    echo '<input type="date" name="billing_fecha_entrega_1" id="billing_fecha_entrega_1" class="input-text" min="' . date('Y-m-d', strtotime('+1 day')) . '" max="' . date('Y-m-d', strtotime('+7 days')) . '" style="width: 100%; padding: 12px; border: 2px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #ffffff; color: #333333; transition: border-color 0.3s ease;">';
-    echo '</div>';
-    
-    echo '<div>';
-    echo '<label for="billing_fecha_entrega_2" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Fecha Alternativa<span class="required" style="color: #e74c3c;">*</span></label>';
-    echo '<input type="date" name="billing_fecha_entrega_2" id="billing_fecha_entrega_2" class="input-text" min="' . date('Y-m-d', strtotime('+1 day')) . '" max="' . date('Y-m-d', strtotime('+7 days')) . '" style="width: 100%; padding: 12px; border: 2px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #ffffff; color: #333333; transition: border-color 0.3s ease;">';
-    echo '</div>';
-    echo '</div>';
-    
-    echo '<p style="margin: 15px 0 0 0; font-size: 13px; color: #6c757d; background: #fff3cd; padding: 10px; border-radius: 4px; border-left: 4px solid #ffc107;">';
-    echo '<strong>Nota:</strong> Selecciona dos fechas disponibles para la entrega. No puede ser anterior a mañana.';
-    echo '</p>';
-    echo '</div>';
-
     // === CAMPOS: EMPRESA Y AGENCIA EN LA MISMA FILA ===
-    echo '<div class="empresa-envio-field" style="margin-bottom: 20px;">';
+    echo '<div class="empresa-envio-field" style="margin-bottom: 20px; display:none;">';
     echo '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
     
     // === CAMPO: EMPRESA DE ENVÍO ===
@@ -695,7 +675,7 @@ function checkout_extra_fields_v1($checkout) {
     echo '</div>';
     
     // === CAMPO: AGENCIA DE ENVÍO ===
-    echo '<div>';
+    echo '<div class="agencia-envio-field" style="display:none;">';
     echo '<label for="billing_agencia_envio" style="display: block; margin-bottom: 8px; font-weight: 600; color: #333333;">Agencia de envío <span class="required" style="color: #e74c3c;">*</span></label>';
     
     if ($modo_agencia === 'texto') {
@@ -710,10 +690,11 @@ function checkout_extra_fields_v1($checkout) {
     
     echo '</div>';
     
-    echo '</div>';
-    echo '</div>';
+    echo '</div>'; // Cerrar agencia-envio-field
+    echo '</div>'; // Cerrar grid
+    echo '</div>'; // Cerrar empresa-envio-field
 
-    echo '</div>';
+    echo '</div>'; // Cerrar extra_fields_checkout
 }
 
 // === GUARDAR CAMPOS ===
@@ -730,11 +711,9 @@ function bytezon_save_extra_checkout_fields_v1($order_id) {
     
     // Debug: Log de todos los campos POST
     error_log('=== DEBUG CHECKOUT CAMPOS ===');
-    error_log('Provincia: ' . ($_POST['billing_provincia'] ?? 'NO ENCONTRADA'));
+    error_log('Provincia: ' . ($_POST['billing_envio'] ?? 'NO ENCONTRADA'));
     error_log('Empresa envío: ' . ($_POST['billing_empresa_envio'] ?? 'NO ENCONTRADA'));
     error_log('Agencia envío: ' . ($_POST['billing_agencia_envio'] ?? 'NO ENCONTRADA'));
-    error_log('Fecha 1: ' . ($_POST['billing_fecha_entrega_1'] ?? 'NO ENCONTRADA'));
-    error_log('Fecha 2: ' . ($_POST['billing_fecha_entrega_2'] ?? 'NO ENCONTRADA'));
     error_log('=== FIN DEBUG ===');
     
     // Guardar empresa de envío (nombre)
@@ -777,16 +756,6 @@ function bytezon_save_extra_checkout_fields_v1($order_id) {
         }
     }
     
-    // Guardar fechas de entrega
-    if (!empty($_POST['billing_fecha_entrega_1'])) {
-        $order->add_meta_data('_billing_fecha_entrega_1', sanitize_text_field($_POST['billing_fecha_entrega_1']), true);
-        error_log('Fecha 1 guardada: ' . $_POST['billing_fecha_entrega_1']);
-    }
-    
-    if (!empty($_POST['billing_fecha_entrega_2'])) {
-        $order->add_meta_data('_billing_fecha_entrega_2', sanitize_text_field($_POST['billing_fecha_entrega_2']), true);
-        error_log('Fecha 2 guardada: ' . $_POST['billing_fecha_entrega_2']);
-    }
     
     // Guardar los metadatos en la base de datos
     $order->save();
@@ -798,23 +767,12 @@ add_action('woocommerce_admin_order_data_after_billing_address', 'bytezon_show_e
 function bytezon_show_extra_checkout_fields_admin_v1($order) {
     $empresa = $order->get_meta('_billing_empresa_envio');
     $agencia = $order->get_meta('_billing_agencia_envio');
-    $fecha_1 = $order->get_meta('_billing_fecha_entrega_1');
-    $fecha_2 = $order->get_meta('_billing_fecha_entrega_2');
-    
     if ($empresa) {
         echo '<p><strong>' . __('Empresa de envío') . ':</strong> ' . esc_html($empresa) . '</p>';
     }
 
     if ($agencia) {
         echo '<p><strong>' . __('Agencia de envío') . ':</strong> ' . esc_html($agencia) . '</p>';
-    }
-    
-    if ($fecha_1 && $fecha_2) {
-        echo '<p><strong>' . __('Fechas de entrega') . ':</strong> ' . esc_html($fecha_1) . ' y ' . esc_html($fecha_2) . '</p>';
-    } elseif ($fecha_1) {
-        echo '<p><strong>' . __('Fecha de entrega 1') . ':</strong> ' . esc_html($fecha_1) . '</p>';
-    } elseif ($fecha_2) {
-        echo '<p><strong>' . __('Fecha de entrega 2') . ':</strong> ' . esc_html($fecha_2) . '</p>';
     }
 }
 
@@ -848,6 +806,19 @@ function bytezon_conditional_checkout_fields_v1() {
     if (is_checkout()) :
     ?>
     <style>
+    /* Estilos responsivos para empresa y agencia */
+    @media screen and (max-width: 600px) {
+        .empresa-envio-field > div {
+            display: block !important;
+            grid-template-columns: 1fr !important;
+        }
+        
+        .empresa-envio-field > div > div {
+            width: 100% !important;
+            margin-bottom: 15px !important;
+        }
+    }
+    
     /* Estilos adicionales para los comboboxes */
     #extra_fields_checkout select:focus {
         border-color: #007cba !important;
@@ -881,16 +852,6 @@ function bytezon_conditional_checkout_fields_v1() {
         transition: all 0.3s ease;
     }
     
-    /* Estilos para el mensaje de información */
-    /* #agencia_info {
-        animation: fadeIn 0.5s ease-in;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(-10px); }
-        to { opacity: 1; transform: translateY(0); }
-    } */
-    
     /* Estilos para las opciones del select */
     #extra_fields_checkout select option {
         background: #ffffff;
@@ -919,29 +880,26 @@ function bytezon_conditional_checkout_fields_v1() {
         jQuery(document).ready(function($) {
             // Función para mostrar/ocultar campos según provincia
             function toggleFieldsByProvince() {
-                var provincia = $('#billing_provincia').val();
+                var provincia = $('input[name="billing_envio"]:checked').val();
                 
-                if (provincia && (provincia.toLowerCase() === 'lima' || provincia.toLowerCase() === 'callao')) {
-                    $('.empresa-envio-field, .agencia-envio-field').hide();
-                    $('.fecha-entrega-field').show();
+                if (provincia === 'Provincia') {
+                    // Mostrar elementos de envío para provincia
+                    $('#delivery-map-section, .empresa-envio-field, .agencia-envio-field, #extra_fields_checkout').show();
                 } else {
-                    $('.empresa-envio-field').show();
-                    $('.fecha-entrega-field').hide();
-                    $('.agencia-envio-field').show();
+                    // Si no es provincia, ocultar todo
+                    $('#delivery-map-section, .empresa-envio-field, .agencia-envio-field, #extra_fields_checkout').hide();
                 }
             }
             
             // Función para inicializar campos al cargar la página
             function initializeFields() {
-                var provincia = $('#billing_provincia').val();
+                // Al cargar la página, OCULTAR TODOS los campos
+                $('#delivery-map-section, .empresa-envio-field, .agencia-envio-field, #extra_fields_checkout').hide();
                 
-                if (provincia && (provincia.toLowerCase() === 'lima' || provincia.toLowerCase() === 'callao')) {
-                    $('.empresa-envio-field, .agencia-envio-field').hide();
-                    $('.fecha-entrega-field').show();
-                } else {
-                    $('.empresa-envio-field').show();
-                    $('.fecha-entrega-field').hide();
-                    $('.agencia-envio-field').show();
+                // Solo mostrar campos si ya hay una opción seleccionada
+                var provincia = $('input[name="billing_envio"]:checked').val();
+                if (provincia) {
+                    toggleFieldsByProvince();
                 }
             }
             
@@ -980,18 +938,23 @@ function bytezon_conditional_checkout_fields_v1() {
             }
             
             // Event Listeners
-            $('#billing_provincia').on('change', function() {
+            $('input[name="billing_envio"]').on('change', function() {
                 $('#billing_empresa_envio').val('').prop('selectedIndex', 0);
                 $('#billing_agencia_envio').val('').prop('selectedIndex', 0);
-                $('#billing_fecha_entrega_1').val('');
-                $('#billing_fecha_entrega_2').val('');
                 toggleFieldsByProvince();
             });
             
             $('#billing_empresa_envio').on('change', function() {
                 var empresaId = $(this).val();
+                var empresaNombre = $(this).find('option:selected').text();
                 
                 $('#billing_agencia_envio').val('');
+                
+                // Verificar si el campo de agencia es un input de texto
+                if ($('#billing_agencia_envio').is('input[type="text"]')) {
+                    // Actualizar placeholder con el nuevo formato sin corchetes
+                    $('#billing_agencia_envio').attr('placeholder', 'Escribe el nombre del ' + empresaNombre + ' de tu zona');
+                }
                 
                 // Verificar si el campo de agencia es un select o input
                 if ($('#billing_agencia_envio').is('select')) {
@@ -1007,13 +970,20 @@ function bytezon_conditional_checkout_fields_v1() {
                 }
             });
 
+            // Posicionar campos después del mapa
+            function positionFieldsAfterMap() {
+                // Mover los campos de empresa/agencia después del mapa
+                $('#extra_fields_checkout').insertAfter('#delivery-map-section');
+            }
+            
+            // Ejecutar posicionamiento después de un pequeño delay para asegurar que el mapa esté cargado
+            setTimeout(function() {
+                positionFieldsAfterMap();
+            }, 500);
+            
             // Inicialización
             initializeFields();
             
-            // Mover todo el bloque de extra_fields_checkout después del mapa
-            if ($('#delivery-map-section').length) {
-                $('#extra_fields_checkout').insertAfter('#delivery-map-section');
-            }
         });
     </script>
     <?php
@@ -1023,25 +993,10 @@ function bytezon_conditional_checkout_fields_v1() {
 // === VALIDACIÓN DE CAMPOS ===
 add_action('woocommerce_checkout_process', 'validate_extra_checkout_fields_v1');
 function validate_extra_checkout_fields_v1() {
-    $provincia = $_POST['billing_provincia'] ?? '';
+    $provincia = $_POST['billing_envio'] ?? '';
     
-    if (strtolower($provincia) === 'lima' || strtolower($provincia) === 'callao') {
-        if (empty($_POST['billing_fecha_entrega_1']) || empty($_POST['billing_fecha_entrega_2'])) {
-            wc_add_notice(__('Por favor selecciona las dos fechas de entrega para Lima/Callao.'), 'error');
-        } else {
-            $fecha_1 = strtotime($_POST['billing_fecha_entrega_1']);
-            $fecha_2 = strtotime($_POST['billing_fecha_entrega_2']);
-            
-            if ($fecha_2 < $fecha_1) {
-                wc_add_notice(__('La fecha 2 debe ser mayor o igual a la fecha 1.'), 'error');
-            }
-            
-            $diferencia_dias = ($fecha_2 - $fecha_1) / (60 * 60 * 24);
-            if ($diferencia_dias > 2) {
-                wc_add_notice(__('El rango de fechas no puede ser mayor a 2 días.'), 'error');
-            }
-        }
-    } else {
+    // Solo validar si es provincia
+    if ($provincia === 'Provincia') {
         if (empty($_POST['billing_empresa_envio'])) {
             wc_add_notice(__('Por favor selecciona una empresa de envío.'), 'error');
         }
@@ -1143,12 +1098,12 @@ function eliminar_agencia_v1_ajax() {
         wp_die('No tienes permisos');
     }
     
-    $agresa_id = intval($_POST['agencia_id']);
+    $agencia_id = intval($_POST['agencia_id']);
     
     $resultado = $wpdb->update(
         $wpdb->prefix . 'agencias_envio_v1',
         array('estado' => 0),
-        array('id' => $agresa_id),
+        array('id' => $agencia_id),
         array('%d'),
         array('%d')
     );
