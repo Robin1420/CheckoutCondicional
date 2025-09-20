@@ -3,7 +3,7 @@
  * Plugin Name: CheckoutCondicionalV.1
  * Description: Sistema de checkout condicional con gestión de empresas de envío, agencias y fechas de entrega según provincia.
  * Author: Robinzon Sanchez
- * Version: 1.0
+ * Version: 1.4
  */
 
 if (!defined('ABSPATH')) exit;
@@ -13,10 +13,50 @@ if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get
     return;
 }
 
+// === LIMPIEZA DE CACHE PARA ACTUALIZACIÓN FORZADA ===
+add_action('init', 'checkout_condicional_v1_force_update', 1);
+function checkout_condicional_v1_force_update() {
+    // Limpiar cache de WordPress
+    if (function_exists('wp_cache_flush')) {
+        wp_cache_flush();
+    }
+    
+    // Limpiar cache de transients
+    if (function_exists('delete_transient')) {
+        delete_transient('checkout_condicional_cache');
+        delete_transient('empresas_envio_cache');
+        delete_transient('agencias_envio_cache');
+    }
+    
+    // Limpiar cache de opciones
+    if (function_exists('wp_cache_delete')) {
+        wp_cache_delete('checkout_condicional_config', 'options');
+    }
+    
+    // Forzar recarga de scripts y estilos
+    if (function_exists('wp_enqueue_scripts')) {
+        wp_dequeue_script('checkout-condicional-v1');
+        wp_dequeue_style('checkout-condicional-v1');
+    }
+}
+
 // === ACTIVACIÓN DEL PLUGIN ===
 register_activation_hook(__FILE__, 'checkout_condicional_v1_activate');
+register_deactivation_hook(__FILE__, 'checkout_condicional_v1_deactivate');
 function checkout_condicional_v1_activate() {
     global $wpdb;
+    
+    // Limpiar cache al activar
+    if (function_exists('wp_cache_flush')) {
+        wp_cache_flush();
+    }
+    
+    // Limpiar transients
+    if (function_exists('delete_transient')) {
+        delete_transient('checkout_condicional_cache');
+        delete_transient('empresas_envio_cache');
+        delete_transient('agencias_envio_cache');
+    }
     
     $charset_collate = $wpdb->get_charset_collate();
     
@@ -100,10 +140,20 @@ function checkout_condicional_v1_activate() {
 }
 
 // === DESACTIVACIÓN DEL PLUGIN ===
-register_deactivation_hook(__FILE__, 'checkout_condicional_v1_deactivate');
 function checkout_condicional_v1_deactivate() {
-    // No eliminamos las tablas para preservar los datos
-    // Solo limpiamos cache si es necesario
+    // Limpiar cache al desactivar
+    if (function_exists('wp_cache_flush')) {
+        wp_cache_flush();
+    }
+    
+    // Limpiar transients
+    if (function_exists('delete_transient')) {
+        delete_transient('checkout_condicional_cache');
+        delete_transient('empresas_envio_cache');
+        delete_transient('agencias_envio_cache');
+    }
+    
+    error_log('=== PLUGIN CHECKOUT CONDICIONAL V1 DESACTIVADO ===');
 }
 
 // === MENÚ ADMINISTRATIVO ===
@@ -640,80 +690,127 @@ function checkout_condicional_v1_admin_page() {
 }
 
 // === CAMPOS DEL CHECKOUT ===
-add_action('woocommerce_after_checkout_billing_form', 'checkout_extra_fields_v1');
-function checkout_extra_fields_v1($checkout) {
+add_action('woocommerce_checkout_fields', 'checkout_extra_fields_integration_v1', 101);
+function checkout_extra_fields_integration_v1($fields) {
     global $wpdb;
+
+    // LOG: Inicio de la función
+    error_log('=== CHECKOUT CONDICIONAL V1 - INTEGRACIÓN UBIGEO ===');
+    error_log('Función checkout_extra_fields_integration_v1 ejecutada');
 
     // Obtener empresas activas
     $empresas = $wpdb->get_results("SELECT id, nombre FROM {$wpdb->prefix}empresas_envio_v1 WHERE estado = 1 ORDER BY nombre");
+    error_log('Empresas encontradas: ' . count($empresas));
     
     // Obtener configuración del modo de agencia
     $modo_agencia = $wpdb->get_var("SELECT config_value FROM {$wpdb->prefix}checkout_condicional_config_v1 WHERE config_key = 'modo_agencia'");
     if (!$modo_agencia) {
         $modo_agencia = 'lista';
     }
+    error_log('Modo de agencia: ' . $modo_agencia);
 
-    echo '<div id="extra_fields_checkout" style="margin-top: 20px; padding: 20px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">';
-    echo '<h3 style="margin: 0 0 20px 0; color: #333333; font-size: 18px; border-bottom: 2px solid #cccccc; padding-bottom: 10px;">Información de Envío</h3>';
-
-    // === CAMPOS: FECHAS DE ENTREGA (para Lima y Callao) ===
-    echo '<div class="fecha-entrega-field" style="display:none;">';
-    echo '<h4 style="margin: 0 0 15px 0; color: #495057; font-size: 16px; border-bottom: 1px solid #dee2e6; padding-bottom: 8px;">Selecciona las Fechas de Entrega</h4>';
-    
-    echo '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
-    echo '<div>';
-    echo '<label for="billing_fecha_entrega_1" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Fecha Preferida<span class="required" style="color: #e74c3c;">*</span></label>';
-    echo '<input type="date" name="billing_fecha_entrega_1" id="billing_fecha_entrega_1" class="input-text" min="' . date('Y-m-d', strtotime('+1 day')) . '" max="' . date('Y-m-d', strtotime('+7 days')) . '" style="width: 100%; padding: 12px; border: 2px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #ffffff; color: #333333; transition: border-color 0.3s ease;">';
-    echo '</div>';
-    
-    echo '<div>';
-    echo '<label for="billing_fecha_entrega_2" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Fecha Alternativa<span class="required" style="color: #e74c3c;">*</span></label>';
-    echo '<input type="date" name="billing_fecha_entrega_2" id="billing_fecha_entrega_2" class="input-text" min="' . date('Y-m-d', strtotime('+1 day')) . '" max="' . date('Y-m-d', strtotime('+7 days')) . '" style="width: 100%; padding: 12px; border: 2px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #ffffff; color: #333333; transition: border-color 0.3s ease;">';
-    echo '</div>';
-    echo '</div>';
-    
-    echo '<p style="margin: 15px 0 0 0; font-size: 13px; color: #6c757d; background: #fff3cd; padding: 10px; border-radius: 4px; border-left: 4px solid #ffc107;">';
-    echo '<strong>Nota:</strong> Selecciona dos fechas disponibles para la entrega. No puede ser anterior a mañana.';
-    echo '</p>';
-    echo '</div>';
-
-    // === CAMPOS: EMPRESA Y AGENCIA EN LA MISMA FILA ===
-    echo '<div class="empresa-envio-field" style="margin-bottom: 20px;">';
-    echo '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">';
-    
-    // === CAMPO: EMPRESA DE ENVÍO ===
-    echo '<div>';
-    echo '<label for="billing_empresa_envio" style="display: block; margin-bottom: 8px; font-weight: 600; color: #333333;">Empresa de envío <span class="required" style="color: #e74c3c;">*</span></label>';
-    echo '<select name="billing_empresa_envio" id="billing_empresa_envio" class="select" style="width: 100%; padding: 12px; border: 2px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #ffffff; color: #333333; transition: border-color 0.3s ease;">';
-    echo '<option value="" disabled selected>Seleccionar empresa</option>';
-    
+    // Preparar opciones de empresas
+    $empresas_options = array('' => 'Seleccionar empresa');
     foreach ($empresas as $empresa) {
-        echo '<option value="' . intval($empresa->id) . '">' . esc_html($empresa->nombre) . '</option>';
+        $empresas_options[$empresa->id] = $empresa->nombre;
     }
-    
-    echo '</select>';
-    echo '</div>';
-    
-    // === CAMPO: AGENCIA DE ENVÍO ===
-    echo '<div>';
-    echo '<label for="billing_agencia_envio" style="display: block; margin-bottom: 8px; font-weight: 600; color: #333333;">Agencia de envío <span class="required" style="color: #e74c3c;">*</span></label>';
-    
-    if ($modo_agencia === 'texto') {
-        // Campo de texto libre
-        echo '<input type="text" name="billing_agencia_envio" id="billing_agencia_envio" class="input-text" placeholder="Escribe el nombre de la agencia" style="width: 100%; padding: 12px; border: 2px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #ffffff; color: #333333; transition: border-color 0.3s ease;">';
-    } else {
-        // Campo de lista (modo por defecto)
-        echo '<select name="billing_agencia_envio" id="billing_agencia_envio" class="select" style="width: 100%; padding: 12px; border: 2px solid #d0d0d0; border-radius: 6px; font-size: 14px; background: #ffffff; color: #333333; transition: border-color 0.3s ease;">';
-        echo '<option value="" disabled selected>Seleccionar agencia</option>';
-        echo '</select>';
-    }
-    
-    echo '</div>';
-    
-    echo '</div>';
-    echo '</div>';
+    error_log('Opciones de empresas preparadas: ' . count($empresas_options) . ' opciones');
 
-    echo '</div>';
+    // === CAMPOS DE ENVÍO CON CONTENEDOR ESTILIZADO ===
+    // Crear un campo personalizado que actúe como contenedor
+    $fields['order']['shipping_info_container'] = array(
+        'type' => 'shipping_info_container',
+        'label' => '',
+        'required' => false,
+        'class' => array('shipping-info-container'),
+        'priority' => 13,
+        'custom_attributes' => array(
+            'data-empresas' => json_encode($empresas_options),
+            'data-modo-agencia' => $modo_agencia
+        )
+    );
+    error_log('Contenedor de información de envío añadido con prioridad 13');
+
+    error_log('Total de campos añadidos a la sección order: ' . count($fields['order']));
+    error_log('=== FIN INTEGRACIÓN UBIGEO ===');
+
+    return $fields;
+}
+
+// === CAMPO PERSONALIZADO PARA CONTENEDOR ===
+add_filter('woocommerce_form_field_shipping_info_container', 'render_shipping_info_container_field', 10, 4);
+function render_shipping_info_container_field($field, $key, $args, $value) {
+    global $wpdb;
+    
+    // Obtener datos de las empresas
+    $empresas = $wpdb->get_results("SELECT id, nombre FROM {$wpdb->prefix}empresas_envio_v1 WHERE estado = 1 ORDER BY nombre");
+    $modo_agencia = $wpdb->get_var("SELECT config_value FROM {$wpdb->prefix}checkout_condicional_config_v1 WHERE config_key = 'modo_agencia'");
+    if (!$modo_agencia) {
+        $modo_agencia = 'lista';
+    }
+    
+    // Preparar opciones de empresas
+    $empresas_options = array('' => 'Seleccionar empresa');
+    foreach ($empresas as $empresa) {
+        $empresas_options[$empresa->id] = $empresa->nombre;
+    }
+    
+    ob_start();
+    ?>
+    <div class="shipping-info-wrapper" id="shipping-info-wrapper" style="display: none;">
+        <div class="shipping-info-header">
+            <h3 class="shipping-info-title">
+                Información de Envío
+            </h3>
+            <p class="shipping-info-description">Selecciona la empresa y agencia de envío para tu pedido</p>
+        </div>
+        
+        <div class="shipping-info-content">
+            <!-- Campos de Empresa y Agencia -->
+            <div class="shipping-fields-row" id="shipping-company-fields">
+                <div class="shipping-field-group">
+                    <label for="billing_empresa_envio" class="shipping-field-label">
+                        <span class="label-text">Empresa de envío</span>
+                        <span class="required-asterisk">*</span>
+                    </label>
+                    <div class="shipping-field-wrapper">
+                        <select name="billing_empresa_envio" id="billing_empresa_envio" class="shipping-field-select" required>
+                            <?php foreach ($empresas_options as $id => $nombre): ?>
+                                <option value="<?php echo esc_attr($id); ?>" <?php selected($id, ''); ?>>
+                                    <?php echo esc_html($nombre); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="field-icon">
+                            <i class="dropdown-icon">▼</i>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="shipping-field-group">
+                    <label for="billing_agencia_envio" class="shipping-field-label">
+                        <span class="label-text">Agencia de envío</span>
+                        <span class="required-asterisk">*</span>
+                    </label>
+                    <div class="shipping-field-wrapper">
+                        <?php if ($modo_agencia === 'texto'): ?>
+                            <input type="text" name="billing_agencia_envio" id="billing_agencia_envio" 
+                                   class="shipping-field-input" placeholder="Escribe el nombre de la agencia" required>
+                        <?php else: ?>
+                            <select name="billing_agencia_envio" id="billing_agencia_envio" class="shipping-field-select" required>
+                                <option value="" disabled selected>Seleccionar agencia</option>
+                            </select>
+                            <div class="field-icon">
+                                <i class="dropdown-icon">▼</i>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php
+    return ob_get_clean();
 }
 
 // === GUARDAR CAMPOS ===
@@ -721,33 +818,42 @@ add_action('woocommerce_checkout_update_order_meta', 'bytezon_save_extra_checkou
 function bytezon_save_extra_checkout_fields_v1($order_id) {
     global $wpdb;
     
+    error_log('=== GUARDAR CAMPOS CHECKOUT CONDICIONAL V1 ===');
+    error_log('Order ID: ' . $order_id);
+    
     // Obtener el objeto de la orden
     $order = wc_get_order($order_id);
     if (!$order) {
-        error_log('Error: No se pudo obtener la orden con ID: ' . $order_id);
+        error_log('ERROR: No se pudo obtener la orden con ID: ' . $order_id);
         return;
     }
     
     // Debug: Log de todos los campos POST
-    error_log('=== DEBUG CHECKOUT CAMPOS ===');
-    error_log('Provincia: ' . ($_POST['billing_provincia'] ?? 'NO ENCONTRADA'));
-    error_log('Empresa envío: ' . ($_POST['billing_empresa_envio'] ?? 'NO ENCONTRADA'));
-    error_log('Agencia envío: ' . ($_POST['billing_agencia_envio'] ?? 'NO ENCONTRADA'));
-    error_log('Fecha 1: ' . ($_POST['billing_fecha_entrega_1'] ?? 'NO ENCONTRADA'));
-    error_log('Fecha 2: ' . ($_POST['billing_fecha_entrega_2'] ?? 'NO ENCONTRADA'));
-    error_log('=== FIN DEBUG ===');
+    error_log('=== CAMPOS POST RECIBIDOS ===');
+    error_log('rt_ubigeo_departamento: ' . ($_POST['rt_ubigeo_departamento'] ?? 'NO ENCONTRADA'));
+    error_log('rt_ubigeo_provincia: ' . ($_POST['rt_ubigeo_provincia'] ?? 'NO ENCONTRADA'));
+    error_log('billing_empresa_envio: ' . ($_POST['billing_empresa_envio'] ?? 'NO ENCONTRADA'));
+    error_log('billing_agencia_envio: ' . ($_POST['billing_agencia_envio'] ?? 'NO ENCONTRADA'));
+    error_log('=== FIN CAMPOS POST ===');
     
     // Guardar empresa de envío (nombre)
     if (!empty($_POST['billing_empresa_envio'])) {
         $empresa_id = intval($_POST['billing_empresa_envio']);
+        error_log('Guardando empresa con ID: ' . $empresa_id);
+        
         $empresa_nombre = $wpdb->get_var($wpdb->prepare(
             "SELECT nombre FROM {$wpdb->prefix}empresas_envio_v1 WHERE id = %d",
             $empresa_id
         ));
+        
         if ($empresa_nombre) {
             $order->add_meta_data('_billing_empresa_envio', $empresa_nombre, true);
-            error_log('Empresa guardada: ' . $empresa_nombre);
+            error_log('Empresa guardada exitosamente: ' . $empresa_nombre);
+        } else {
+            error_log('ERROR: No se encontró empresa con ID: ' . $empresa_id);
         }
+    } else {
+        error_log('No hay empresa de envío para guardar');
     }
     
     // Guardar agencia de envío (nombre)
@@ -757,6 +863,7 @@ function bytezon_save_extra_checkout_fields_v1($order_id) {
         if (!$modo_agencia) {
             $modo_agencia = 'lista';
         }
+        error_log('Modo de agencia para guardar: ' . $modo_agencia);
         
         if ($modo_agencia === 'texto') {
             // Modo texto: guardar directamente el valor ingresado
@@ -766,31 +873,35 @@ function bytezon_save_extra_checkout_fields_v1($order_id) {
         } else {
             // Modo lista: buscar el nombre en la base de datos
             $agencia_id = intval($_POST['billing_agencia_envio']);
+            error_log('Buscando agencia con ID: ' . $agencia_id);
+            
             $agencia_nombre = $wpdb->get_var($wpdb->prepare(
                 "SELECT nombre FROM {$wpdb->prefix}agencias_envio_v1 WHERE id = %d",
                 $agencia_id
             ));
+            
             if ($agencia_nombre) {
                 $order->add_meta_data('_billing_agencia_envio', $agencia_nombre, true);
                 error_log('Agencia guardada (lista): ' . $agencia_nombre);
+            } else {
+                error_log('ERROR: No se encontró agencia con ID: ' . $agencia_id);
             }
         }
+    } else {
+        error_log('No hay agencia de envío para guardar');
     }
     
-    // Guardar fechas de entrega
-    if (!empty($_POST['billing_fecha_entrega_1'])) {
-        $order->add_meta_data('_billing_fecha_entrega_1', sanitize_text_field($_POST['billing_fecha_entrega_1']), true);
-        error_log('Fecha 1 guardada: ' . $_POST['billing_fecha_entrega_1']);
-    }
-    
-    if (!empty($_POST['billing_fecha_entrega_2'])) {
-        $order->add_meta_data('_billing_fecha_entrega_2', sanitize_text_field($_POST['billing_fecha_entrega_2']), true);
-        error_log('Fecha 2 guardada: ' . $_POST['billing_fecha_entrega_2']);
-    }
+    // Las fechas de entrega ya no se usan
     
     // Guardar los metadatos en la base de datos
-    $order->save();
-    error_log('Orden guardada con metadatos actualizados');
+    $result = $order->save();
+    if ($result) {
+        error_log('Orden guardada exitosamente con metadatos actualizados');
+    } else {
+        error_log('ERROR: No se pudo guardar la orden');
+    }
+    
+    error_log('=== FIN GUARDAR CAMPOS ===');
 }
 
 // === MOSTRAR EN ADMIN ===
@@ -798,8 +909,6 @@ add_action('woocommerce_admin_order_data_after_billing_address', 'bytezon_show_e
 function bytezon_show_extra_checkout_fields_admin_v1($order) {
     $empresa = $order->get_meta('_billing_empresa_envio');
     $agencia = $order->get_meta('_billing_agencia_envio');
-    $fecha_1 = $order->get_meta('_billing_fecha_entrega_1');
-    $fecha_2 = $order->get_meta('_billing_fecha_entrega_2');
     
     if ($empresa) {
         echo '<p><strong>' . __('Empresa de envío') . ':</strong> ' . esc_html($empresa) . '</p>';
@@ -807,14 +916,6 @@ function bytezon_show_extra_checkout_fields_admin_v1($order) {
 
     if ($agencia) {
         echo '<p><strong>' . __('Agencia de envío') . ':</strong> ' . esc_html($agencia) . '</p>';
-    }
-    
-    if ($fecha_1 && $fecha_2) {
-        echo '<p><strong>' . __('Fechas de entrega') . ':</strong> ' . esc_html($fecha_1) . ' y ' . esc_html($fecha_2) . '</p>';
-    } elseif ($fecha_1) {
-        echo '<p><strong>' . __('Fecha de entrega 1') . ':</strong> ' . esc_html($fecha_1) . '</p>';
-    } elseif ($fecha_2) {
-        echo '<p><strong>' . __('Fecha de entrega 2') . ':</strong> ' . esc_html($fecha_2) . '</p>';
     }
 }
 
@@ -824,9 +925,13 @@ add_action('wp_ajax_nopriv_get_agencias_checkout_v1', 'get_agencias_checkout_v1_
 function get_agencias_checkout_v1_ajax() {
     global $wpdb;
     
+    error_log('=== AJAX GET AGENCIAS CHECKOUT V1 ===');
+    
     $empresa_id = intval($_POST['empresa_id']);
+    error_log('Empresa ID recibido: ' . $empresa_id);
     
     if (!$empresa_id) {
+        error_log('ERROR: ID de empresa no válido');
         wp_send_json_error('ID de empresa no válido');
         return;
     }
@@ -839,6 +944,12 @@ function get_agencias_checkout_v1_ajax() {
         $empresa_id
     ));
     
+    error_log('Agencias encontradas: ' . count($agencias));
+    if (count($agencias) > 0) {
+        error_log('Primera agencia: ' . $agencias[0]->nombre);
+    }
+    
+    error_log('=== FIN AJAX GET AGENCIAS ===');
     wp_send_json_success($agencias);
 }
 
@@ -846,112 +957,394 @@ function get_agencias_checkout_v1_ajax() {
 add_action('wp_footer', 'bytezon_conditional_checkout_fields_v1');
 function bytezon_conditional_checkout_fields_v1() {
     if (is_checkout()) :
+        // Parámetro de versión para forzar recarga
+        $version = '1.1.' . time();
     ?>
     <style>
-    /* Estilos adicionales para los comboboxes */
-    #extra_fields_checkout select:focus {
-        border-color: #007cba !important;
-        box-shadow: 0 0 0 1px #007cba !important;
-        outline: none !important;
+    /* === ESTILOS PROFESIONALES PARA CONTENEDOR DE ENVÍO === */
+    /* Versión: <?php echo $version; ?> - Actualización forzada */
+    
+    /* Contenedor principal */
+    .shipping-info-wrapper {
+        background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+        border: 1px solid #e1e5e9;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        margin: 10px 0;
+        overflow: hidden;
+        transition: all 0.3s ease;
+        position: relative;
     }
     
-    #extra_fields_checkout input[type="date"]:focus {
-        border-color: #007cba !important;
-        box-shadow: 0 0 0 1px #007cba !important;
-        outline: none !important;
+    .shipping-info-wrapper:hover {
+        box-shadow: 0 6px 25px rgba(0, 0, 0, 0.12);
+        transform: translateY(-2px);
     }
     
-    /* Estilos para las opciones disabled */
-    #extra_fields_checkout select option[disabled] {
-        color: #999999;
+    /* Header del contenedor */
+    .shipping-info-header {
+        background: #007cba;
+        color: white;
+        padding: 20px 20px 0px 20px;
+        position: relative;
+        overflow: hidden;
+        border-radius: 12px 12px 0 0;
+    }
+    
+    .shipping-info-title {
+        margin: 0 0 5px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: white;
+        position: relative;
+        z-index: 1;
+    }
+    
+    .shipping-info-description {
+        margin: 0;
+        font-size: 12px;
+        opacity: 1;
+        position: relative;
+        z-index: 1;
+        line-height: 1.4;
+    }
+    
+    /* Contenido del contenedor */
+    .shipping-info-content {
+        padding: 0px 20px 0px 20px;
+        background: white;
+    }
+    
+    /* Fila de campos */
+    .shipping-fields-row {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 0;
+    }
+    
+    .shipping-fields-row:last-child {
+        margin-bottom: 0;
+    }
+    
+    /* Grupo de campo individual */
+    .shipping-field-group {
+        flex: 1;
+        position: relative;
+    }
+    
+    /* Labels */
+    .shipping-field-label {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #2c3e50;
+        font-size: 14px;
+        position: relative;
+    }
+    
+    .label-text {
+        display: inline-block;
+    }
+    
+    .required-asterisk {
+        color: #e74c3c;
+        margin-left: 3px;
+        font-weight: bold;
+        font-size: 14px;
+        line-height: 1;
+    }
+    
+    .optional-text {
+        color: #7f8c8d;
+        font-weight: 400;
+        font-size: 12px;
+        margin-left: 5px;
+    }
+    
+    /* Wrapper del campo */
+    .shipping-field-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+    
+    /* Campos de entrada */
+    .shipping-field-select,
+    .shipping-field-input {
+        width: 100%;
+        padding: 12px 40px 12px 14px;
+        border: 1px solid #d0d0d0;
+        border-radius: 8px;
+        font-size: 14px;
+        background: #ffffff;
+        color: #2c3e50;
+        transition: all 0.3s ease;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+    }
+    
+    .shipping-field-select:focus,
+    .shipping-field-input:focus {
+        border-color: #007cba;
+        box-shadow: 0 0 0 3px rgba(0, 124, 186, 0.1);
+        outline: none;
+        transform: translateY(-1px);
+    }
+    
+    .shipping-field-select:hover,
+    .shipping-field-input:hover {
+        border-color: #bdc3c7;
+        transform: translateY(-1px);
+    }
+    
+    /* Iconos de los campos */
+    .field-icon {
+        position: absolute;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        pointer-events: none;
+        color: #7f8c8d;
+        font-size: 12px;
+        transition: color 0.3s ease;
+    }
+    
+    .shipping-field-select:focus + .field-icon,
+    .shipping-field-input:focus + .field-icon {
+        color: #007cba;
+    }
+    
+    .dropdown-icon {
+        font-size: 10px;
+    }
+    
+    .calendar-icon {
+        font-size: 14px;
+    }
+    
+    /* Estados especiales */
+    .shipping-field-select option[disabled] {
+        color: #bdc3c7;
         font-style: italic;
     }
     
-    /* Hover en los comboboxes */
-    #extra_fields_checkout select:hover {
-        border-color: #b0b0b0 !important;
-    }
-    
-    #extra_fields_checkout input[type="date"]:hover {
-        border-color: #b0b0b0 !important;
-    }
-    
-    /* Animación suave para los campos */
-    .empresa-envio-field, .agencia-envio-field, .fecha-entrega-field {
-        transition: all 0.3s ease;
-    }
-    
-    /* Estilos para el mensaje de información */
-    /* #agencia_info {
-        animation: fadeIn 0.5s ease-in;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(-10px); }
-        to { opacity: 1; transform: translateY(0); }
-    } */
-    
-    /* Estilos para las opciones del select */
-    #extra_fields_checkout select option {
-        background: #ffffff;
-        color: #333333;
-    }
-    
-    #extra_fields_checkout select option:hover {
-        background: #f8f9fa;
-    }
-    
-    /* Estilos adicionales para mejorar la apariencia */
-    #extra_fields_checkout {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    }
-    
-    #extra_fields_checkout h3 {
+    .shipping-field-select option:not([disabled]) {
         color: #2c3e50;
     }
     
-    #extra_fields_checkout label {
-        color: #34495e;
+    /* Animaciones */
+    .shipping-fields-row {
+        animation: slideInUp 0.5s ease-out;
+    }
+    
+    @keyframes slideInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+        .shipping-info-wrapper {
+            margin: 15px 0;
+            border-radius: 8px;
+        }
+        
+        .shipping-info-header {
+            padding: 12px 15px;
+        }
+        
+        .shipping-info-title {
+            font-size: 15px;
+        }
+        
+        .shipping-info-description {
+            font-size: 11px;
+        }
+        
+        .shipping-info-content {
+            padding: 15px;
+        }
+        
+        .shipping-fields-row {
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .shipping-field-select,
+        .shipping-field-input {
+            padding: 10px 35px 10px 12px;
+        }
+    }
+    
+    @media (max-width: 480px) {
+        .shipping-info-header {
+            padding: 10px 12px;
+        }
+        
+        .shipping-info-title {
+            font-size: 14px;
+        }
+        
+        .shipping-info-description {
+            font-size: 10px;
+        }
+        
+        .shipping-info-content {
+            padding: 12px;
+        }
+        
+        .shipping-field-select,
+        .shipping-field-input {
+            padding: 8px 30px 8px 10px;
+            font-size: 13px;
+        }
+    }
+    
+    /* Integración con WooCommerce */
+    .woocommerce-checkout .shipping-info-wrapper {
+        margin-top: 15px;
+    }
+    
+    /* Ocultar campos cuando no son necesarios */
+    .shipping-fields-row[style*="display: none"] {
+        display: none !important;
     }
     </style>
     
     <script type="text/javascript">
+        // Versión: <?php echo $version; ?> - Actualización forzada
         jQuery(document).ready(function($) {
-            // Función para mostrar/ocultar campos según provincia
-            function toggleFieldsByProvince() {
-                var provincia = $('#billing_provincia').val();
+            console.log('=== CHECKOUT CONDICIONAL V1 - JAVASCRIPT INICIADO ===');
+            console.log('Versión del plugin: <?php echo $version; ?>');
+            
+            // Ya no necesitamos lista específica de provincias de Lima
+            
+            // Función para verificar si debe mostrar información de envío
+            function shouldShowShippingInfo(departamento, provincia) {
+                console.log('🔍 shouldShowShippingInfo - Departamento ID:', departamento, 'Provincia ID:', provincia);
                 
-                if (provincia && (provincia.toLowerCase() === 'lima' || provincia.toLowerCase() === 'callao')) {
-                    $('.empresa-envio-field, .agencia-envio-field').hide();
-                    $('.fecha-entrega-field').show();
-                } else {
-                    $('.empresa-envio-field').show();
-                    $('.fecha-entrega-field').hide();
-                    $('.agencia-envio-field').show();
+                // Si no hay departamento, no mostrar
+                if (!departamento) {
+                    console.log('❌ No hay departamento - NO mostrar envío');
+                    return false;
                 }
+                
+                // Obtener nombres reales de los selects
+                var deptText = $('#rt_ubigeo_departamento option:selected').text().toLowerCase().trim();
+                var provText = $('#rt_ubigeo_provincia option:selected').text().toLowerCase().trim();
+                
+                console.log('🔍 Textos reales - DeptText:', deptText, 'ProvText:', provText);
+                
+                // ❌ NO mostrar cuando: Departamento = Callao (independientemente de la provincia)
+                if (deptText === 'callao') {
+                    console.log('❌ Callao (cualquier provincia) - NO mostrar envío');
+                    return false;
+                }
+                
+                // ✅ SÍ mostrar cuando: Departamento ≠ Lima y Departamento ≠ Callao (inmediatamente)
+                if (deptText !== 'lima' && deptText !== 'callao') {
+                    console.log('✅ Departamento ≠ Lima/Callao - SÍ mostrar envío');
+                    return true;
+                }
+                
+                // Para Lima, validar provincia
+                if (deptText === 'lima') {
+                    // ❌ NO mostrar cuando: No hay provincia seleccionada (solo para Lima)
+                    if (!provincia || provText === 'seleccione una provincia' || provText === 'seleccionar provincia' || provText === '') {
+                        console.log('❌ Lima sin provincia seleccionada - NO mostrar envío');
+                        return false;
+                    }
+                    
+                    // ❌ NO mostrar cuando: Departamento = Lima y Provincia = Lima
+                    if (provText === 'lima') {
+                        console.log('❌ Lima + Lima - NO mostrar envío');
+                        return false;
+                    }
+                    
+                    // ❌ NO mostrar cuando: Departamento = Lima y Provincia = Callao
+                    if (provText === 'callao') {
+                        console.log('❌ Lima + Callao - NO mostrar envío');
+                        return false;
+                    }
+                    
+                    // ✅ SÍ mostrar cuando: Departamento = Lima y Provincia ≠ Lima y Provincia ≠ Callao
+                    console.log('✅ Lima + Provincia ≠ Lima/Callao - SÍ mostrar envío');
+                    return true;
+                }
+                
+                // Por defecto, no mostrar
+                console.log('❌ Condición no reconocida - NO mostrar envío');
+                return false;
+            }
+            
+            // Función para mostrar/ocultar campos según departamento y provincia
+            function toggleFieldsByLocation() {
+                var departamento = $('#rt_ubigeo_departamento').val();
+                var provincia = $('#rt_ubigeo_provincia').val();
+                
+                console.log('toggleFieldsByLocation - Departamento:', departamento, 'Provincia:', provincia);
+                
+                var showShipping = shouldShowShippingInfo(departamento, provincia);
+                
+                if (showShipping) {
+                    console.log('✅ Mostrando información de envío');
+                    $('#shipping-info-wrapper').show();
+                } else {
+                    console.log('❌ Ocultando información de envío');
+                    $('#shipping-info-wrapper').hide();
+                }
+                
+                // Log del estado final del contenedor
+                console.log('Estado final del contenedor - Visible:', $('#shipping-info-wrapper').is(':visible'));
             }
             
             // Función para inicializar campos al cargar la página
             function initializeFields() {
-                var provincia = $('#billing_provincia').val();
+                var departamento = $('#rt_ubigeo_departamento').val();
+                var provincia = $('#rt_ubigeo_provincia').val();
                 
-                if (provincia && (provincia.toLowerCase() === 'lima' || provincia.toLowerCase() === 'callao')) {
-                    $('.empresa-envio-field, .agencia-envio-field').hide();
-                    $('.fecha-entrega-field').show();
+                console.log('initializeFields - Departamento inicial ID:', departamento, 'Provincia inicial ID:', provincia);
+                
+                // Si hay departamento seleccionado, evaluar
+                if (departamento) {
+                    var deptText = $('#rt_ubigeo_departamento option:selected').text().toLowerCase().trim();
+                    console.log('initializeFields - Departamento texto:', deptText);
+                    
+                    if (deptText === 'callao') {
+                        console.log('Inicialización: Callao - Ocultando');
+                        $('#shipping-info-wrapper').hide();
+                    } else if (deptText === 'lima') {
+                        console.log('Inicialización: Lima - Evaluando con provincia');
+                        toggleFieldsByLocation();
+                    } else {
+                        console.log('Inicialización: Departamento ≠ Lima/Callao - Mostrando');
+                        $('#shipping-info-wrapper').show();
+                    }
                 } else {
-                    $('.empresa-envio-field').show();
-                    $('.fecha-entrega-field').hide();
-                    $('.agencia-envio-field').show();
+                    console.log('Inicialización: No hay departamento - Manteniendo oculto');
+                    $('#shipping-info-wrapper').hide();
                 }
             }
             
             // Función para cargar agencias
             function loadAgencies(empresaId) {
+                console.log('loadAgencies - Empresa ID:', empresaId);
+                
                 if (!empresaId || empresaId === '') {
+                    console.log('loadAgencies - Empresa ID vacío, saliendo');
                     return;
                 }
                 
                 $('#billing_agencia_envio').html('<option value="" disabled selected>Cargando agencias...</option>');
+                console.log('loadAgencies - Iniciando AJAX para cargar agencias');
                 
                 $.ajax({
                     url: '<?php echo admin_url('admin-ajax.php'); ?>',
@@ -961,6 +1354,8 @@ function bytezon_conditional_checkout_fields_v1() {
                         empresa_id: empresaId
                     },
                     success: function(response) {
+                        console.log('loadAgencies - Respuesta AJAX:', response);
+                        
                         if (response.success && response.data && response.data.length > 0) {
                             var options = '<option value="" disabled selected>Seleccionar agencia</option>';
                             
@@ -969,51 +1364,99 @@ function bytezon_conditional_checkout_fields_v1() {
                             });
                             
                             $('#billing_agencia_envio').html(options);
+                            console.log('loadAgencies - Agencias cargadas:', response.data.length);
                         } else {
                             $('#billing_agencia_envio').html('<option value="" disabled selected>No hay agencias disponibles</option>');
+                            console.log('loadAgencies - No hay agencias disponibles');
                         }
                     },
                     error: function(xhr, status, error) {
+                        console.log('loadAgencies - Error AJAX:', error);
+                        console.log('loadAgencies - Response:', xhr.responseText);
                         $('#billing_agencia_envio').html('<option value="" disabled selected>Error al cargar agencias</option>');
                     }
                 });
             }
             
-            // Event Listeners
-            $('#billing_provincia').on('change', function() {
+            // Event Listeners para Ubigeo
+            $('#rt_ubigeo_departamento').on('change', function() {
+                console.log('Evento: Cambio en rt_ubigeo_departamento');
+                // Limpiar campos cuando cambie el departamento
                 $('#billing_empresa_envio').val('').prop('selectedIndex', 0);
                 $('#billing_agencia_envio').val('').prop('selectedIndex', 0);
-                $('#billing_fecha_entrega_1').val('');
-                $('#billing_fecha_entrega_2').val('');
-                toggleFieldsByProvince();
+                
+                // Obtener nombre real del departamento
+                var deptText = $(this).find('option:selected').text().toLowerCase().trim();
+                console.log('Departamento seleccionado (texto):', deptText);
+                
+                // Si el departamento es Callao, ocultar inmediatamente
+                if (deptText === 'callao') {
+                    console.log('Callao seleccionado - Ocultando inmediatamente');
+                    $('#shipping-info-wrapper').hide();
+                }
+                // Si el departamento es Lima, evaluar con la provincia actual (NO mostrar hasta seleccionar provincia)
+                else if (deptText === 'lima') {
+                    console.log('Lima seleccionado - Evaluando con provincia');
+                    toggleFieldsByLocation();
+                }
+                // Si el departamento es diferente a Lima y Callao, mostrar inmediatamente
+                else {
+                    console.log('Departamento ≠ Lima/Callao - Mostrando inmediatamente');
+                    $('#shipping-info-wrapper').show();
+                }
             });
             
+            $('#rt_ubigeo_provincia').on('change', function() {
+                console.log('Evento: Cambio en rt_ubigeo_provincia');
+                // Limpiar campos cuando cambie la provincia
+                $('#billing_empresa_envio').val('').prop('selectedIndex', 0);
+                $('#billing_agencia_envio').val('').prop('selectedIndex', 0);
+                toggleFieldsByLocation();
+            });
+            
+            // Event Listeners para empresa de envío
             $('#billing_empresa_envio').on('change', function() {
                 var empresaId = $(this).val();
+                console.log('Evento: Cambio en billing_empresa_envio - Empresa ID:', empresaId);
                 
                 $('#billing_agencia_envio').val('');
                 
                 // Verificar si el campo de agencia es un select o input
                 if ($('#billing_agencia_envio').is('select')) {
+                    console.log('Campo agencia es SELECT - Modo lista');
                     // Modo lista: cargar agencias
                     if (empresaId && empresaId !== '') {
                         loadAgencies(empresaId);
-                    } else {
-                        $('.agencia-envio-field').hide();
                     }
                 } else {
-                    // Modo texto: mostrar campo de texto
-                    $('.agencia-envio-field').show();
+                    console.log('Campo agencia es INPUT - Modo texto');
                 }
             });
+
+            // Verificar que los campos existen
+            console.log('Verificando existencia de campos:');
+            console.log('- rt_ubigeo_departamento:', $('#rt_ubigeo_departamento').length);
+            console.log('- rt_ubigeo_provincia:', $('#rt_ubigeo_provincia').length);
+            console.log('- billing_empresa_envio:', $('#billing_empresa_envio').length);
+            console.log('- billing_agencia_envio:', $('#billing_agencia_envio').length);
+            console.log('- shipping-info-wrapper:', $('#shipping-info-wrapper').length);
+            console.log('- shipping-company-fields:', $('#shipping-company-fields').length);
+            
+            // Verificar estado inicial del contenedor
+            console.log('Estado inicial del contenedor:');
+            console.log('- shipping-info-wrapper visible:', $('#shipping-info-wrapper').is(':visible'));
+            console.log('- shipping-info-wrapper display:', $('#shipping-info-wrapper').css('display'));
 
             // Inicialización
             initializeFields();
             
-            // Mover todo el bloque de extra_fields_checkout después del mapa
-            if ($('#delivery-map-section').length) {
-                $('#extra_fields_checkout').insertAfter('#delivery-map-section');
-            }
+            // Re-inicializar cuando se actualice el checkout
+            $(document.body).on('updated_checkout', function() {
+                console.log('Evento: updated_checkout - Re-inicializando campos');
+                setTimeout(initializeFields, 100);
+            });
+            
+            console.log('=== CHECKOUT CONDICIONAL V1 - JAVASCRIPT CONFIGURADO ===');
         });
     </script>
     <?php
@@ -1023,32 +1466,90 @@ function bytezon_conditional_checkout_fields_v1() {
 // === VALIDACIÓN DE CAMPOS ===
 add_action('woocommerce_checkout_process', 'validate_extra_checkout_fields_v1');
 function validate_extra_checkout_fields_v1() {
-    $provincia = $_POST['billing_provincia'] ?? '';
+    error_log('=== VALIDACIÓN CHECKOUT CONDICIONAL V1 ===');
     
-    if (strtolower($provincia) === 'lima' || strtolower($provincia) === 'callao') {
-        if (empty($_POST['billing_fecha_entrega_1']) || empty($_POST['billing_fecha_entrega_2'])) {
-            wc_add_notice(__('Por favor selecciona las dos fechas de entrega para Lima/Callao.'), 'error');
-        } else {
-            $fecha_1 = strtotime($_POST['billing_fecha_entrega_1']);
-            $fecha_2 = strtotime($_POST['billing_fecha_entrega_2']);
-            
-            if ($fecha_2 < $fecha_1) {
-                wc_add_notice(__('La fecha 2 debe ser mayor o igual a la fecha 1.'), 'error');
-            }
-            
-            $diferencia_dias = ($fecha_2 - $fecha_1) / (60 * 60 * 24);
-            if ($diferencia_dias > 2) {
-                wc_add_notice(__('El rango de fechas no puede ser mayor a 2 días.'), 'error');
-            }
+    // Obtener departamento y provincia desde ubigeo
+    $departamento_id = $_POST['rt_ubigeo_departamento'] ?? '';
+    $provincia_id = $_POST['rt_ubigeo_provincia'] ?? '';
+    $departamento_nombre = '';
+    $provincia_nombre = '';
+    
+    error_log('Departamento ID desde POST: ' . $departamento_id);
+    error_log('Provincia ID desde POST: ' . $provincia_id);
+    
+    if ($departamento_id) {
+        global $wpdb;
+        $departamento_nombre = $wpdb->get_var($wpdb->prepare(
+            "SELECT departamento FROM {$wpdb->prefix}ubigeo_departamentos WHERE id = %d",
+            $departamento_id
+        ));
+        error_log('Departamento nombre desde BD: ' . $departamento_nombre);
+    }
+    
+    if ($provincia_id) {
+        global $wpdb;
+        $provincia_nombre = $wpdb->get_var($wpdb->prepare(
+            "SELECT provincia FROM {$wpdb->prefix}ubigeo_provincias WHERE id = %d",
+            $provincia_id
+        ));
+        error_log('Provincia nombre desde BD: ' . $provincia_nombre);
+    }
+    
+    // Verificar si debe mostrar información de envío
+    $shouldShowShipping = false;
+    
+    if ($departamento_nombre && $provincia_nombre) {
+        $deptLower = strtolower($departamento_nombre);
+        $provLower = strtolower($provincia_nombre);
+        
+        // ❌ NO mostrar cuando: Departamento = Callao (independientemente de la provincia)
+        if ($deptLower === 'callao') {
+            error_log('Callao (cualquier provincia) - NO validar envío');
+            $shouldShowShipping = false;
         }
-    } else {
-        if (empty($_POST['billing_empresa_envio'])) {
-            wc_add_notice(__('Por favor selecciona una empresa de envío.'), 'error');
+        // ❌ NO mostrar cuando: Departamento = Lima y Provincia = Lima
+        elseif ($deptLower === 'lima' && $provLower === 'lima') {
+            error_log('Lima + Lima - NO validar envío');
+            $shouldShowShipping = false;
         }
-        if (empty($_POST['billing_agencia_envio'])) {
-            wc_add_notice(__('Por favor selecciona una agencia de envío.'), 'error');
+        // ❌ NO mostrar cuando: Departamento = Lima y Provincia = Callao
+        elseif ($deptLower === 'lima' && $provLower === 'callao') {
+            error_log('Lima + Callao - NO validar envío');
+            $shouldShowShipping = false;
+        }
+        // ✅ SÍ mostrar cuando: Departamento ≠ Lima
+        elseif ($deptLower !== 'lima') {
+            error_log('Departamento ≠ Lima - SÍ validar envío');
+            $shouldShowShipping = true;
+        }
+        // ✅ SÍ mostrar cuando: Departamento = Lima y Provincia ≠ Lima y Provincia ≠ Callao
+        elseif ($deptLower === 'lima' && $provLower !== 'lima' && $provLower !== 'callao') {
+            error_log('Lima + Provincia ≠ Lima/Callao - SÍ validar envío');
+            $shouldShowShipping = true;
         }
     }
+    
+    if ($shouldShowShipping) {
+        error_log('Validando empresa y agencia para: ' . $departamento_nombre . ' - ' . $provincia_nombre);
+        
+        if (empty($_POST['billing_empresa_envio'])) {
+            error_log('ERROR: Empresa de envío faltante');
+            wc_add_notice(__('Por favor selecciona una empresa de envío.'), 'error');
+        } else {
+            error_log('Empresa de envío seleccionada: ' . $_POST['billing_empresa_envio']);
+        }
+        
+        if (empty($_POST['billing_agencia_envio'])) {
+            error_log('ERROR: Agencia de envío faltante');
+            wc_add_notice(__('Por favor selecciona una agencia de envío.'), 'error');
+        } else {
+            error_log('Agencia de envío seleccionada: ' . $_POST['billing_agencia_envio']);
+        }
+    } else {
+        error_log('NO se requiere validación de envío para: ' . $departamento_nombre . ' - ' . $provincia_nombre);
+    }
+    
+    error_log('=== FIN VALIDACIÓN ===');
 }
 
 // === AJAX PARA ADMIN ===
